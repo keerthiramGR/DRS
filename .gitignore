@@ -1,0 +1,28 @@
+# Pocket DRS Pro Master Gitignore
+
+# Local Environment Variables
+.env
+*.env
+
+# Node.js Backend Filters
+backend/node_modules/
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Python AI Server Filters
+ai_server/venv/
+ai_server/env/
+ai_server/__pycache__/
+ai_server/*.pyc
+ai_server/.pytest_cache/
+
+# Flutter Mobile Filters
+pocket_drs_pro/.dart_tool/
+pocket_drs_pro/build/
+pocket_drs_pro/.flutter-plugins
+pocket_drs_pro/.flutter-plugins-dependencies
+pocket_drs_pro/pubspec.lock
+
+# Logs & temp files
+*.log
+.system_generated/
