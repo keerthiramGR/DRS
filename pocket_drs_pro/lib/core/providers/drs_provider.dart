@@ -348,7 +348,7 @@ class DrsNotifier extends StateNotifier<DrsState> {
 
   void _setupSockets() {
     _wsClient.connect(
-      serverUrl: 'http://localhost:5000',
+      serverUrl: 'https://drs-production-057d.up.railway.app',
       onConnectionChanged: (isConnected) {
         state = state.copyWith(
           isConnected: isConnected,

@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  static const String baseUrl = 'http://localhost:5000/api'; // Swap out with production URL
+  static const String baseUrl = 'https://drs-production-057d.up.railway.app/api'; // Swap out with production URL
 
   // Helper method for post requests
   static Future<Map<String, dynamic>> post(String endpoint, Map<String, dynamic> body) async {
