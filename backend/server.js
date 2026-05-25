@@ -23,6 +23,7 @@ const AI_SERVER_URL = process.env.AI_SERVER_URL || 'http://localhost:8000';
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Configure file storage for replays
 const storage = multer.diskStorage({
@@ -88,7 +89,21 @@ async function forwardToAIServer(endpoint, body, fallbackGenerator) {
 
 // 3. Track Ball API
 app.post('/api/trackBall', async (req, res) => {
-  const { frames } = req.body; // Array of image/depth data
+  const { videoPath, video_session_id, frame_count } = req.body;
+  
+  let aiVideoPath = videoPath;
+  if (videoPath && videoPath.startsWith('/uploads/')) {
+    const host = req.get('host');
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    aiVideoPath = `${protocol}://${host}${videoPath}`;
+  }
+
+  const aiBody = {
+    video_session_id: video_session_id || 'default_session',
+    frame_count: frame_count || 30,
+    video_path: aiVideoPath
+  };
+
   const fallback = (data) => {
     // Generate simulated coordinates (x: lateral, y: distance down pitch, z: height)
     const pointsCount = 20;
@@ -125,7 +140,7 @@ app.post('/api/trackBall', async (req, res) => {
     return { x_coords: x, y_coords: y, z_coords: z, time_deltas };
   };
 
-  const results = await forwardToAIServer('/track-ball', req.body, fallback);
+  const results = await forwardToAIServer('/track-ball', aiBody, fallback);
   res.json(results);
 });
 

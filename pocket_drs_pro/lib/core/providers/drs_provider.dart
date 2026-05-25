@@ -634,12 +634,12 @@ class DrsNotifier extends StateNotifier<DrsState> {
     );
   }
 
-  void triggerReview(String eventType) {
+  void triggerReview(String eventType, {String? videoPath}) {
     _wsClient.triggerDrsReview(roomId: state.activeRoomId, eventType: eventType);
-    runDrsAnalysisPipeline(eventType);
+    runDrsAnalysisPipeline(eventType, videoPath: videoPath);
   }
 
-  Future<void> runDrsAnalysisPipeline(String type) async {
+  Future<void> runDrsAnalysisPipeline(String type, {String? videoPath}) async {
     state = state.copyWith(
       isTracking: true,
       isCalculatingSpeed: true,
@@ -651,7 +651,11 @@ class DrsNotifier extends StateNotifier<DrsState> {
     );
 
     try {
-      final ballData = await ApiClient.post('/trackBall', {'video_session_id': state.activeMatchId, 'frame_count': 30});
+      final ballData = await ApiClient.post('/trackBall', {
+        'video_session_id': state.activeMatchId,
+        'frame_count': 30,
+        if (videoPath != null) 'videoPath': videoPath,
+      });
       final List<double> xList = List<double>.from(ballData['x_coords']);
       final List<double> yList = List<double>.from(ballData['y_coords']);
       final List<double> zList = List<double>.from(ballData['z_coords']);

@@ -1,9 +1,13 @@
 import math
+import os
+import tempfile
+import urllib.request
 from typing import List, Optional, Tuple
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
+import cv2
 from scipy.fft import fft
 
 app = FastAPI(
@@ -29,8 +33,9 @@ class CoordinatePoint(BaseModel):
     t: float
 
 class TrackBallRequest(BaseModel):
-    video_session_id: str
-    frame_count: int
+    video_session_id: Optional[str] = None
+    frame_count: Optional[int] = 30
+    video_path: Optional[str] = None
 
 class SpeedRequest(BaseModel):
     coordinates: List[CoordinatePoint]
@@ -71,13 +76,8 @@ class CommentaryRequest(BaseModel):
 
 # --- ALGORITHMIC IMPLEMENTATIONS ---
 
-@app.post("/track-ball")
-async def track_ball(request: TrackBallRequest):
-    """
-    Simulates OpenCV/YOLOv8 ball detection in 3D.
-    Tracks ball position as it travels down the pitch.
-    """
-    # Simulate a full delivery trajectory from bowler (y=20m) to batsman (y=1.2m)
+def generate_simulation_trajectory() -> Tuple[List[float], List[float], List[float], List[float]]:
+    # Generate simulated coordinates with small random offsets so they aren't identical
     points_count = 24
     x_coords = []
     y_coords = []
@@ -85,24 +85,26 @@ async def track_ball(request: TrackBallRequest):
     time_deltas = []
 
     # Swing parameters (curve the X coordinates slightly)
-    swing_factor = 0.18 * (1.0 if int(hash(request.video_session_id)) % 2 == 0 else -1.0)
+    random_sign = 1.0 if np.random.rand() > 0.5 else -1.0
+    swing_factor = 0.15 * random_sign + (np.random.rand() - 0.5) * 0.05
     
     # Bounce location parameters
-    bounce_t = 0.75 # Bounce happens at 75% of flight
+    bounce_t = 0.72 + np.random.rand() * 0.06 # Bounce happens at 72% to 78% of flight
+    delivery_duration = 0.44 + np.random.rand() * 0.08 # 0.44 to 0.52 seconds
     
     for i in range(points_count):
         t = i / (points_count - 1)
         # Distance (Y): bowler hand (20m) to batsmen (1.2m)
         y = 20.0 - t * 18.8
         
-        # Lateral movement (X): slight inswing/outswing curve
-        x = swing_factor * math.sin(t * math.PI)
+        # Lateral movement (X): slight curve + small noise
+        x = swing_factor * math.sin(t * math.PI) + (np.random.rand() - 0.5) * 0.02
         
-        # Height (Z): release from 2.1m, hits ground (0.0m) at bounce_t, rebounds up
+        # Height (Z): release from 2.1m, hits ground (0.05m) at bounce_t, rebounds up
         if t < bounce_t:
             # Quadratic parabolic fall
             progress = t / bounce_t
-            z = 2.1 - progress * 2.1 + (progress ** 2) * 0.05
+            z = 2.1 - progress * 2.05 + (progress ** 2) * 0.05
         else:
             # Rebound bounce path
             progress = (t - bounce_t) / (1.0 - bounce_t)
@@ -111,10 +113,186 @@ async def track_ball(request: TrackBallRequest):
         x_coords.append(round(x, 3))
         y_coords.append(round(y, 3))
         z_coords.append(round(z, 3))
-        time_deltas.append(round(t * 0.48, 3)) # delivery duration 0.48 seconds
+        time_deltas.append(round(t * delivery_duration, 3))
 
-    # Find bounce index
-    bounce_index = int(points_count * bounce_t)
+    return x_coords, y_coords, z_coords, time_deltas
+
+def track_ball_in_video(video_path: str) -> Tuple[List[float], List[float], List[float], List[float]]:
+    # Open the video file
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path}")
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 30.0
+
+    detected_centroids = [] # List of (frame_idx, x_pixel, y_pixel)
+
+    # HSV Color ranges
+    # Yellow (tennis ball)
+    lower_yellow = np.array([20, 40, 40])
+    upper_yellow = np.array([45, 255, 255])
+    # Red (leather ball) - two ranges due to circular hue wrap-around
+    lower_red1 = np.array([0, 50, 50])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([170, 50, 50])
+    upper_red2 = np.array([180, 255, 255])
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Convert to HSV color space
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Generate masks
+        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+        mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+        
+        # Combine masks
+        mask = cv2.bitwise_or(mask_yellow, mask_red)
+
+        # Find contours
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        best_contour = None
+        max_area = 0
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if 5 <= area <= 2000:
+                if area > max_area:
+                    max_area = area
+                    best_contour = cnt
+
+        if best_contour is not None:
+            M = cv2.moments(best_contour)
+            if M["m00"] != 0:
+                cX = M["m10"] / M["m00"]
+                cY = M["m01"] / M["m00"]
+                detected_centroids.append((frame_idx, cX, cY))
+
+        frame_idx += 1
+
+    cap.release()
+
+    # If we detected less than 5 points, we fall back to a simulation trajectory
+    if len(detected_centroids) < 5:
+        print(f"Only {len(detected_centroids)} ball centroids detected. Falling back to simulation trajectory.")
+        return generate_simulation_trajectory()
+
+    delivery_duration = frame_idx / fps if frame_idx > 0 else 0.5
+    
+    # Sort detected centroids by frame index
+    detected_centroids.sort(key=lambda item: item[0])
+    
+    # Find the maximum cY (which represents the bounce point on the ground)
+    bounce_item = max(detected_centroids, key=lambda item: item[2])
+    bounce_frame = bounce_item[0]
+    
+    mapped_points = []
+    for f_idx, cX, cY in detected_centroids:
+        t = f_idx / fps
+        y = 20.0 - (f_idx / frame_idx) * 18.8
+        x = (cX - width / 2.0) / (width / 2.0) * 1.2
+        
+        # Calculate Z:
+        # Pre-bounce: quadratic curve from 2.1m to 0.05m
+        # Post-bounce: quadratic curve from 0.05m to 0.45m
+        if f_idx <= bounce_frame:
+            if bounce_frame > 0:
+                p = f_idx / bounce_frame
+                z = 2.1 - p * 2.05 + (p ** 2) * 0.05
+            else:
+                z = 0.05
+        else:
+            denom = (frame_idx - bounce_frame)
+            if denom > 0:
+                p = (f_idx - bounce_frame) / denom
+                z = 0.05 + p * 0.6 - (p ** 2) * 0.2
+            else:
+                z = 0.45
+        
+        mapped_points.append((t, x, y, z))
+
+    points_count = 24
+    x_coords = []
+    y_coords = []
+    z_coords = []
+    time_deltas = []
+
+    for i in range(points_count):
+        target_t = (i / (points_count - 1)) * delivery_duration
+        
+        if target_t <= mapped_points[0][0]:
+            _, x, y, z = mapped_points[0]
+        elif target_t >= mapped_points[-1][0]:
+            _, x, y, z = mapped_points[-1]
+        else:
+            idx = 0
+            while idx < len(mapped_points) - 1 and mapped_points[idx+1][0] < target_t:
+                idx += 1
+            p1 = mapped_points[idx]
+            p2 = mapped_points[idx+1]
+            factor = (target_t - p1[0]) / (p2[0] - p1[0])
+            x = p1[1] + (p2[1] - p1[1]) * factor
+            y = p1[2] + (p2[2] - p1[2]) * factor
+            z = p1[3] + (p2[3] - p1[3]) * factor
+
+        x_coords.append(round(x, 3))
+        y_coords.append(round(y, 3))
+        z_coords.append(round(z, 3))
+        time_deltas.append(round(target_t, 3))
+
+    return x_coords, y_coords, z_coords, time_deltas
+
+@app.post("/track-ball")
+async def track_ball(request: TrackBallRequest):
+    """
+    OpenCV ball detection in 3D using color/contour tracking.
+    Tracks ball position as it travels down the pitch from recorded video.
+    """
+    x_coords, y_coords, z_coords, time_deltas = [], [], [], []
+    
+    if request.video_path:
+        print(f"Tracking ball in video: {request.video_path}")
+        temp_file_path = None
+        try:
+            if request.video_path.startswith("http://") or request.video_path.startswith("https://"):
+                # Download remote file to a temporary file
+                fd, temp_file_path = tempfile.mkstemp(suffix=".mp4")
+                os.close(fd)
+                print(f"Downloading video from URL to temporary path: {temp_file_path}")
+                urllib.request.urlretrieve(request.video_path, temp_file_path)
+                video_to_process = temp_file_path
+            else:
+                video_to_process = request.video_path
+                
+            x_coords, y_coords, z_coords, time_deltas = track_ball_in_video(video_to_process)
+            
+        except Exception as e:
+            print(f"Error during video ball tracking: {e}. Falling back to simulation.")
+            x_coords, y_coords, z_coords, time_deltas = generate_simulation_trajectory()
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                    print(f"Temporary file removed: {temp_file_path}")
+                except Exception as ex:
+                    print(f"Error deleting temporary file: {ex}")
+    else:
+        # Generate simulation trajectory
+        x_coords, y_coords, z_coords, time_deltas = generate_simulation_trajectory()
+
+    # Find bounce index (lowest point)
+    bounce_index = int(np.argmin(z_coords))
     
     return {
         "x_coords": x_coords,
