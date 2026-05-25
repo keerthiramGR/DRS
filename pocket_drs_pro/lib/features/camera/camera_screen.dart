@@ -176,7 +176,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
       // Upload the video via multipart
       final uri = Uri.parse('https://drs-production-057d.up.railway.app/api/uploadFrames');
       final request = http.MultipartRequest('POST', uri);
-      request.files.add(await http.MultipartFile.fromPath('file', videoFile.path));
+      final bytes = await videoFile.readAsBytes();
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: videoFile.name,
+        ),
+      );
       
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
