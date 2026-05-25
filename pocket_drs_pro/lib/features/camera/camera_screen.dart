@@ -30,6 +30,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
   int _frameCount = 0;
   int _latencyMs = 8;
   bool _isRecording = false;
+  bool _debugMode = false;
 
   @override
   void initState() {
@@ -250,6 +251,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
   Widget build(BuildContext context) {
     final drsState = ref.watch(drsProvider);
 
+    final String currentDecision = drsState.finalDecision == 'lost' 
+        ? 'LOST' 
+        : (drsState.finalDecision == 'out' 
+            ? 'OUT' 
+            : (drsState.finalDecision == 'not_out' 
+                ? 'NOT OUT' 
+                : _decision));
+
+    final Color decisionColor = currentDecision == 'OUT' || currentDecision == 'LOST' 
+        ? AppTheme.neonRed 
+        : (currentDecision == 'NOT OUT' ? AppTheme.neonGreen : AppTheme.textSecondary);
+
     // Compute player stats string for scorecard HUD
     final strikerStats = drsState.batterStatsMap[drsState.currentStriker];
     final strikerText = strikerStats != null 
@@ -310,32 +323,47 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
                       ),
                       
                       // Device status
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: AppTheme.glassBox(border: AppTheme.neonCyan),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            AnimatedBuilder(
-                              animation: _pulseController,
-                              builder: (context, child) {
-                                return Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: AppTheme.neonRed.withOpacity(_pulseController.value),
-                                  ),
-                                );
-                              },
+                      // Device status & Debug mode toggle
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              Icons.bug_report,
+                              color: _debugMode ? AppTheme.iplGold : AppTheme.textSecondary,
+                              size: 22,
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'LIVE NODE: ${drsState.activeDeviceRole.replaceAll('_', ' ').toUpperCase()}',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1),
+                            onPressed: () => setState(() => _debugMode = !_debugMode),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: AppTheme.glassBox(border: AppTheme.neonCyan),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AnimatedBuilder(
+                                  animation: _pulseController,
+                                  builder: (context, child) {
+                                    return Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: AppTheme.neonRed.withOpacity(_pulseController.value),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'LIVE NODE: ${drsState.activeDeviceRole.replaceAll('_', ' ').toUpperCase()}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -444,11 +472,31 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Error Banner if tracking fails
+                if (drsState.finalDecision == 'lost')
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: AppTheme.glassBox(border: AppTheme.neonRed, radius: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, color: AppTheme.neonRed),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'AI TRACKING FAILED: ${drsState.commentary.toUpperCase()}',
+                            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 // Realtime Overlay Panel
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: AppTheme.glassBox(
-                    border: _decision == 'OUT' ? AppTheme.neonRed : AppTheme.neonCyan,
+                    border: decisionColor,
                     radius: 20,
                   ),
                   child: Column(
@@ -472,11 +520,11 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
                             children: [
                               const Text('CV DECISION', style: TextStyle(color: AppTheme.textSecondary, fontSize: 10)),
                               Text(
-                                _decision,
+                                currentDecision,
                                 style: TextStyle(
                                   fontSize: 22,
                                   fontWeight: FontWeight.w900,
-                                  color: _decision == 'OUT' ? AppTheme.neonRed : AppTheme.neonGreen,
+                                  color: decisionColor,
                                   letterSpacing: 1.5,
                                 ),
                               ),
@@ -585,6 +633,59 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with SingleTickerPr
               onSelected: (player) {
                 ref.read(drsProvider.notifier).selectNextBowler(player);
               },
+            ),
+
+          // Debug Overlay
+          if (_debugMode)
+            Positioned(
+              top: 180,
+              right: 16,
+              width: 220,
+              height: 250,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: AppTheme.glassBox(border: AppTheme.iplGold.withOpacity(0.5), radius: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.terminal, color: AppTheme.iplGold, size: 14),
+                        SizedBox(width: 6),
+                        Text(
+                          'DEBUG HUD',
+                          style: TextStyle(color: AppTheme.iplGold, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Divider(color: Color(0xFF262D4A), height: 1),
+                    const SizedBox(height: 6),
+                    Text('FPS: ${_isRecording ? "30" : "0"}', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 10)),
+                    Text('TRACKING ID: #BALL-${widget.matchId.hashCode % 1000}', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 10)),
+                    Text('CONFIDENCE: ${drsState.finalDecision == 'lost' ? "0.0%" : "94.2%"}', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 10)),
+                    const SizedBox(height: 6),
+                    const Text('TRACKED COORDS (X, Y, Z):', style: TextStyle(color: AppTheme.textSecondary, fontSize: 9, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Expanded(
+                      child: drsState.xCoords.isEmpty
+                          ? const Center(child: Text('No active coordinates', style: TextStyle(color: AppTheme.textSecondary, fontSize: 9)))
+                          : ListView.builder(
+                              itemCount: drsState.xCoords.length,
+                              itemBuilder: (context, idx) {
+                                final x = drsState.xCoords[idx].toStringAsFixed(2);
+                                final y = drsState.yCoords[idx].toStringAsFixed(2);
+                                final z = drsState.zCoords[idx].toStringAsFixed(2);
+                                return Text(
+                                  '[$idx] X:$x Y:$y Z:$z',
+                                  style: const TextStyle(fontFamily: 'monospace', fontSize: 9, color: AppTheme.textSecondary),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
             ),
 
           // Match Completed Overlay

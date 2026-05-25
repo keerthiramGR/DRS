@@ -656,6 +656,18 @@ class DrsNotifier extends StateNotifier<DrsState> {
         'frame_count': 30,
         if (videoPath != null) 'videoPath': videoPath,
       });
+      if (ballData['error'] != null) {
+        state = state.copyWith(
+          isTracking: false,
+          isCalculatingSpeed: false,
+          isEvaluatingLbw: false,
+          isAnalyzingAudio: false,
+          isEvaluatingCrease: false,
+          finalDecision: 'lost',
+          commentary: ballData['error'],
+        );
+        return;
+      }
       final List<double> xList = List<double>.from(ballData['x_coords']);
       final List<double> yList = List<double>.from(ballData['y_coords']);
       final List<double> zList = List<double>.from(ballData['z_coords']);
