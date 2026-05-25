@@ -98,7 +98,7 @@ def generate_simulation_trajectory() -> Tuple[List[float], List[float], List[flo
         y = 20.0 - t * 18.8
         
         # Lateral movement (X): slight curve + small noise
-        x = swing_factor * math.sin(t * math.PI) + (np.random.rand() - 0.5) * 0.02
+        x = swing_factor * math.sin(t * math.pi) + (np.random.rand() - 0.5) * 0.02
         
         # Height (Z): release from 2.1m, hits ground (0.05m) at bounce_t, rebounds up
         if t < bounce_t:
